@@ -1,0 +1,17 @@
+{
+  "name": "bridge-bidding-practice",
+  "version": "1.0.0",
+  "description": "Bridge bidding practice application with multiplayer support",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["bridge", "bidding", "multiplayer"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.6.1",
+    "uuid": "^9.0.0"
+  }
+}

@@ -1,0 +1,46 @@
+BRIDGE BIDDING PRACTICE - QUICK START GUIDE
+============================================
+
+TWO WAYS TO USE THIS APPLICATION:
+
+1. LOCAL MODE (Easy - No Setup)
+   -----------------------------
+   - Just double-click "index.html"
+   - Two players take turns on the same computer
+   - Your browser opens automatically
+   - Select partnership and start playing!
+
+2. MULTIPLAYER MODE (Each player on their own device)
+   ---------------------------------------------------
+   Step 1: Install Node.js from https://nodejs.org/ (if not installed)
+
+   Step 2: Open Command Prompt or Terminal
+
+   Step 3: Navigate to this folder:
+           cd c:\Arvind\Bridge
+
+   Step 4: Install dependencies (first time only):
+           npm install
+
+   Step 5: Start the server:
+           npm start
+
+   Step 6: Player 1 opens browser to:
+           http://localhost:3000
+           - Enter name
+           - Click "Create New Room"
+           - Share room code/link with Player 2
+
+   Step 7: Player 2 opens the shared link or enters room code
+
+   Step 8: Play together in real-time!
+
+
+TROUBLESHOOTING:
+----------------
+- Error loading page? Make sure the server is running (npm start)
+- Can't connect? Check that both players use the same room code
+- Bids not syncing? Refresh both browsers
+
+
+For more details, see README.md
