@@ -1159,33 +1159,44 @@ function showParContractModal() {
     resultHTML += `<div style="margin-top: 5px; color: #2c7a7b; font-size: 16px;">Optimum Score: ${currentHand.parScore}</div>`;
     resultHTML += '</div>';
 
-    // Display all four hands
+    // Display all four hands around a table
     resultHTML += '<div style="margin: 20px 0;">';
     resultHTML += '<h4 style="margin-bottom: 15px; color: #2d3748; text-align: center;">All Four Hands</h4>';
-    resultHTML += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">';
 
-    const displayHand = (position, posIndex) => {
+    const displayHand = (position) => {
         const hand = formatHand(allHands[position]);
         const isPartnership = (position === player1Position || position === player2Position);
         const bgColor = isPartnership ? '#e6f7ff' : '#ffe6e6';
         const borderColor = isPartnership ? '#4299e1' : '#f56565';
 
-        let html = `<div style="padding: 12px; background: ${bgColor}; border: 2px solid ${borderColor}; border-radius: 8px;">`;
-        html += `<h5 style="margin-bottom: 8px; color: #2d3748; text-align: center; font-weight: bold;">${positionNames[position]}</h5>`;
-        html += '<div style="font-family: monospace; font-size: 13px;">';
-        html += `<div style="padding: 4px; background: white; margin: 2px 0; border-radius: 3px;"><span style="color: #000;">♠</span> ${hand.S || '-'}</div>`;
-        html += `<div style="padding: 4px; background: white; margin: 2px 0; border-radius: 3px;"><span style="color: #ff0000;">♥</span> ${hand.H || '-'}</div>`;
-        html += `<div style="padding: 4px; background: white; margin: 2px 0; border-radius: 3px;"><span style="color: #ff8800;">♦</span> ${hand.D || '-'}</div>`;
-        html += `<div style="padding: 4px; background: white; margin: 2px 0; border-radius: 3px;"><span style="color: #008800;">♣</span> ${hand.C || '-'}</div>`;
+        let html = `<div style="padding: 10px; background: ${bgColor}; border: 2px solid ${borderColor}; border-radius: 8px;">`;
+        html += `<div style="font-weight: bold; text-align: center; margin-bottom: 6px; color: #2d3748;">${positionNames[position]}</div>`;
+        html += '<div style="font-family: monospace; font-size: 12px;">';
+        html += `<div style="padding: 3px; background: white; margin: 2px 0; border-radius: 3px;"><span style="color: #000;">♠</span> ${hand.S || '-'}</div>`;
+        html += `<div style="padding: 3px; background: white; margin: 2px 0; border-radius: 3px;"><span style="color: #ff0000;">♥</span> ${hand.H || '-'}</div>`;
+        html += `<div style="padding: 3px; background: white; margin: 2px 0; border-radius: 3px;"><span style="color: #ff8800;">♦</span> ${hand.D || '-'}</div>`;
+        html += `<div style="padding: 3px; background: white; margin: 2px 0; border-radius: 3px;"><span style="color: #008800;">♣</span> ${hand.C || '-'}</div>`;
         html += '</div></div>';
         return html;
     };
 
-    // Display in order: North, South, East, West
-    resultHTML += displayHand('N', 0);
-    resultHTML += displayHand('S', 2);
-    resultHTML += displayHand('E', 1);
-    resultHTML += displayHand('W', 3);
+    // Table layout: North at top, South at bottom, West left, East right
+    resultHTML += '<div style="display: grid; grid-template-columns: 1fr 2fr 1fr; grid-template-rows: auto auto auto; gap: 10px; max-width: 500px; margin: 0 auto;">';
+
+    // Row 1: North (center)
+    resultHTML += '<div></div>'; // empty left
+    resultHTML += displayHand('N'); // North top center
+    resultHTML += '<div></div>'; // empty right
+
+    // Row 2: West, Table, East
+    resultHTML += displayHand('W'); // West left
+    resultHTML += '<div style="background: #2f855a; border-radius: 8px; display: flex; align-items: center; justify-content: center; min-height: 80px; color: white; font-weight: bold; font-size: 14px;">TABLE</div>'; // Table center
+    resultHTML += displayHand('E'); // East right
+
+    // Row 3: South (center)
+    resultHTML += '<div></div>'; // empty left
+    resultHTML += displayHand('S'); // South bottom center
+    resultHTML += '<div></div>'; // empty right
 
     resultHTML += '</div></div>';
 
