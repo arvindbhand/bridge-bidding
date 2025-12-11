@@ -297,12 +297,17 @@ function copyInviteLink() {
 document.addEventListener('DOMContentLoaded', () => {
     initializeSocket();
 
-    // Check if joining via invite link
+    // Check if joining via invite link or creating new game
     const urlParams = new URLSearchParams(window.location.search);
     const roomId = urlParams.get('room');
     if (roomId) {
+        // Player 2 joining existing room
         document.getElementById('lobbyTitle').textContent = 'Join Your Partner\'s Game';
         document.getElementById('joinBtn').textContent = 'Join as Partner';
+    } else {
+        // Player 1 creating new room
+        document.getElementById('lobbyTitle').textContent = 'Welcome! Enter Your Name';
+        document.getElementById('joinBtn').textContent = 'Create Game';
     }
 });
 
