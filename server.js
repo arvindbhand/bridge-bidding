@@ -22,6 +22,20 @@ app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
 
+// API endpoint to get available rooms (waiting for partner)
+app.get('/api/rooms', (req, res) => {
+    const availableRooms = [];
+    for (const [roomId, room] of rooms.entries()) {
+        if (!room.player2) {
+            availableRooms.push({
+                roomId: roomId,
+                hostName: room.player1.name
+            });
+        }
+    }
+    res.json(availableRooms);
+});
+
 // Store active rooms
 const rooms = new Map();
 

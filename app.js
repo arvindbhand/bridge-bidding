@@ -293,6 +293,46 @@ function copyInviteLink() {
     setTimeout(() => { btn.textContent = originalText; }, 2000);
 }
 
+// Fetch and display available rooms
+function fetchAvailableRooms() {
+    fetch('/api/rooms')
+        .then(response => response.json())
+        .then(rooms => {
+            const availableRoomsDiv = document.getElementById('availableRooms');
+            const roomsList = document.getElementById('roomsList');
+
+            if (rooms.length > 0) {
+                availableRoomsDiv.style.display = 'block';
+                roomsList.innerHTML = rooms.map(room => `
+                    <div class="room-item">
+                        <span class="room-host">${room.hostName} is waiting for a partner</span>
+                        <button class="room-join-btn" onclick="joinExistingRoom('${room.roomId}')">Join</button>
+                    </div>
+                `).join('');
+            } else {
+                availableRoomsDiv.style.display = 'none';
+                roomsList.innerHTML = '';
+            }
+        })
+        .catch(error => {
+            console.error('Failed to fetch available rooms:', error);
+        });
+}
+
+// Join an existing room from the list
+function joinExistingRoom(roomId) {
+    const playerName = document.getElementById('playerNameInput').value.trim();
+
+    if (!playerName) {
+        document.getElementById('lobbyStatus').innerHTML =
+            `<span style="color: #e53e3e;">Please enter your name first</span>`;
+        return;
+    }
+
+    document.getElementById('lobbyTitle').textContent = 'Joining Game...';
+    socket.emit('join-room', { roomId: roomId, playerName: playerName });
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
     initializeSocket();
@@ -301,13 +341,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const urlParams = new URLSearchParams(window.location.search);
     const roomId = urlParams.get('room');
     if (roomId) {
-        // Player 2 joining existing room
+        // Player 2 joining existing room via link
         document.getElementById('lobbyTitle').textContent = 'Join Your Partner\'s Game';
         document.getElementById('joinBtn').textContent = 'Join as Partner';
     } else {
         // Player 1 creating new room
         document.getElementById('lobbyTitle').textContent = 'Welcome! Enter Your Name';
         document.getElementById('joinBtn').textContent = 'Create Game';
+
+        // Check for available rooms to join
+        fetchAvailableRooms();
+        // Refresh available rooms every 5 seconds
+        setInterval(fetchAvailableRooms, 5000);
     }
 });
 
