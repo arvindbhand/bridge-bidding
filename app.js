@@ -200,6 +200,18 @@ function updateTurnIndicatorClient() {
     const indicator = document.getElementById('turnIndicator');
     const currentPos = positions[currentBidder % 4];
 
+    // Always show Player 2's own hand (they are player2Position)
+    document.getElementById('player2Spades').textContent = window.player2HandData.S || '-';
+    document.getElementById('player2Hearts').textContent = window.player2HandData.H || '-';
+    document.getElementById('player2Diamonds').textContent = window.player2HandData.D || '-';
+    document.getElementById('player2Clubs').textContent = window.player2HandData.C || '-';
+
+    // Always hide partner's hand
+    document.getElementById('player1Spades').textContent = '???';
+    document.getElementById('player1Hearts').textContent = '???';
+    document.getElementById('player1Diamonds').textContent = '???';
+    document.getElementById('player1Clubs').textContent = '???';
+
     if (auctionComplete) {
         indicator.textContent = 'Bidding Complete';
         indicator.className = 'turn-indicator waiting-indicator';
@@ -214,44 +226,18 @@ function updateTurnIndicatorClient() {
         indicator.className = 'turn-indicator';
         document.getElementById('player1Section').classList.add('active');
         document.getElementById('player2Section').classList.remove('active');
-        // Show partner's hand area but not their cards
-        document.getElementById('player1Spades').textContent = '???';
-        document.getElementById('player1Hearts').textContent = '???';
-        document.getElementById('player1Diamonds').textContent = '???';
-        document.getElementById('player1Clubs').textContent = '???';
-        document.getElementById('player2Spades').textContent = '???';
-        document.getElementById('player2Hearts').textContent = '???';
-        document.getElementById('player2Diamonds').textContent = '???';
-        document.getElementById('player2Clubs').textContent = '???';
         disableBidding();
     } else if (currentPos === player2Position) {
         indicator.textContent = `Your Turn (${positionNames[currentPos]})`;
         indicator.className = 'turn-indicator';
         document.getElementById('player2Section').classList.add('active');
         document.getElementById('player1Section').classList.remove('active');
-        // Show MY hand
-        document.getElementById('player2Spades').textContent = window.player2HandData.S || '-';
-        document.getElementById('player2Hearts').textContent = window.player2HandData.H || '-';
-        document.getElementById('player2Diamonds').textContent = window.player2HandData.D || '-';
-        document.getElementById('player2Clubs').textContent = window.player2HandData.C || '-';
-        document.getElementById('player1Spades').textContent = '???';
-        document.getElementById('player1Hearts').textContent = '???';
-        document.getElementById('player1Diamonds').textContent = '???';
-        document.getElementById('player1Clubs').textContent = '???';
         enableBidding();
     } else {
         indicator.textContent = `${positionNames[currentPos]}'s Turn (Opponent)`;
         indicator.className = 'turn-indicator waiting-indicator';
         document.getElementById('player1Section').classList.remove('active');
         document.getElementById('player2Section').classList.remove('active');
-        document.getElementById('player1Spades').textContent = '???';
-        document.getElementById('player1Hearts').textContent = '???';
-        document.getElementById('player1Diamonds').textContent = '???';
-        document.getElementById('player1Clubs').textContent = '???';
-        document.getElementById('player2Spades').textContent = '???';
-        document.getElementById('player2Hearts').textContent = '???';
-        document.getElementById('player2Diamonds').textContent = '???';
-        document.getElementById('player2Clubs').textContent = '???';
         disableBidding();
     }
 }
@@ -833,41 +819,29 @@ function updateTurnIndicator() {
         return;
     }
 
+    // Always show Player 1's own hand (they are player1Position)
+    document.getElementById('player1Spades').textContent = window.player1HandData.S || '-';
+    document.getElementById('player1Hearts').textContent = window.player1HandData.H || '-';
+    document.getElementById('player1Diamonds').textContent = window.player1HandData.D || '-';
+    document.getElementById('player1Clubs').textContent = window.player1HandData.C || '-';
+
+    // Always hide partner's hand
+    document.getElementById('player2Spades').textContent = '???';
+    document.getElementById('player2Hearts').textContent = '???';
+    document.getElementById('player2Diamonds').textContent = '???';
+    document.getElementById('player2Clubs').textContent = '???';
+
     if (currentPos === player1Position) {
         indicator.textContent = `Your Turn (${positionNames[currentPos]})`;
         indicator.className = 'turn-indicator';
         document.getElementById('player1Section').classList.add('active');
         document.getElementById('player2Section').classList.remove('active');
-
-        // Show MY hand (Player 1's hand)
-        document.getElementById('player1Spades').textContent = window.player1HandData.S || '-';
-        document.getElementById('player1Hearts').textContent = window.player1HandData.H || '-';
-        document.getElementById('player1Diamonds').textContent = window.player1HandData.D || '-';
-        document.getElementById('player1Clubs').textContent = window.player1HandData.C || '-';
-
-        document.getElementById('player2Spades').textContent = '???';
-        document.getElementById('player2Hearts').textContent = '???';
-        document.getElementById('player2Diamonds').textContent = '???';
-        document.getElementById('player2Clubs').textContent = '???';
-
         enableBidding();
     } else if (currentPos === player2Position) {
         indicator.textContent = `${partnerPlayerName}'s Turn (${positionNames[currentPos]})`;
         indicator.className = 'turn-indicator';
         document.getElementById('player2Section').classList.add('active');
         document.getElementById('player1Section').classList.remove('active');
-
-        // Hide both hands - waiting for partner
-        document.getElementById('player2Spades').textContent = '???';
-        document.getElementById('player2Hearts').textContent = '???';
-        document.getElementById('player2Diamonds').textContent = '???';
-        document.getElementById('player2Clubs').textContent = '???';
-
-        document.getElementById('player1Spades').textContent = '???';
-        document.getElementById('player1Hearts').textContent = '???';
-        document.getElementById('player1Diamonds').textContent = '???';
-        document.getElementById('player1Clubs').textContent = '???';
-
         disableBidding();
         // Wait for Player 2's bid to come via client-bid socket event
     } else {
@@ -875,18 +849,6 @@ function updateTurnIndicator() {
         indicator.className = 'turn-indicator waiting-indicator';
         document.getElementById('player1Section').classList.remove('active');
         document.getElementById('player2Section').classList.remove('active');
-
-        // Hide both hands during opponent's turn
-        document.getElementById('player1Spades').textContent = '???';
-        document.getElementById('player1Hearts').textContent = '???';
-        document.getElementById('player1Diamonds').textContent = '???';
-        document.getElementById('player1Clubs').textContent = '???';
-
-        document.getElementById('player2Spades').textContent = '???';
-        document.getElementById('player2Hearts').textContent = '???';
-        document.getElementById('player2Diamonds').textContent = '???';
-        document.getElementById('player2Clubs').textContent = '???';
-
         disableBidding();
 
         // Host generates AI bids
