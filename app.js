@@ -16,58 +16,104 @@ const positionNames = { 'N': 'North', 'S': 'South', 'E': 'East', 'W': 'West' };
 // ==================== MULTIPLAYER LOBBY SYSTEM ====================
 let socket = null;
 let currentRoomId = null;
-let myPlayerNumber = null;
+let myPosition = null;
 let myPlayerName = null;
-let partnerPlayerName = null;
+let roomPlayers = { N: null, S: null, E: null, W: null };
+let isRoomHost = false;
+let pendingJoinRoomId = null; // Used when joining from the available rooms list
 
-// Check if I am the host (Player 1)
+// Check if I am the host
 function isHost() {
-    return myPlayerNumber === 1;
+    return isRoomHost;
 }
 
 // Initialize Socket.IO connection
 function initializeSocket() {
     socket = io();
 
-    // Room created successfully (Player 1 - HOST)
+    // Room created successfully (HOST)
     socket.on('room-created', (data) => {
         currentRoomId = data.roomId;
-        myPlayerNumber = data.playerNumber;
+        myPosition = data.position;
         myPlayerName = data.playerName;
+        isRoomHost = true;
+        roomPlayers[data.position] = { name: myPlayerName, isMe: true };
+
+        // Update browser tab title
+        document.title = `${myPlayerName} - ${positionNames[myPosition]} | Bridge`;
 
         // Show invite link
         const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${data.roomId}`;
         document.getElementById('inviteLink').value = inviteUrl;
         document.getElementById('inviteSection').style.display = 'block';
         document.getElementById('lobbyStatus').innerHTML =
-            `<span style="color: #48bb78;">Room created! You are Player 1 (Host): ${myPlayerName}</span>`;
+            `<span style="color: #48bb78;">Room created! You are ${positionNames[myPosition]} (Host): ${myPlayerName}</span>`;
         document.getElementById('joinBtn').disabled = true;
         document.getElementById('playerNameInput').disabled = true;
+
+        // Move to setup screen after a delay
+        setTimeout(() => {
+            document.getElementById('lobbyScreen').style.display = 'none';
+            document.getElementById('setupScreen').style.display = 'block';
+            updateSetupScreenForMultiplayer();
+            updateStartButton();
+        }, 2000);
     });
 
-    // Successfully joined a room (Player 2 - CLIENT)
+    // Successfully joined a room
     socket.on('room-joined', (data) => {
         currentRoomId = data.roomId;
-        myPlayerNumber = data.playerNumber;
+        myPosition = data.position;
         myPlayerName = data.playerName;
-        partnerPlayerName = data.partner;
+        isRoomHost = false;
+
+        // Update browser tab title
+        document.title = `${myPlayerName} - ${positionNames[myPosition]} | Bridge`;
+
+        // Store all current players in the room
+        if (data.currentPlayers) {
+            ['N', 'S', 'E', 'W'].forEach(pos => {
+                if (pos === myPosition) {
+                    roomPlayers[pos] = { name: myPlayerName, isMe: true };
+                } else if (data.currentPlayers[pos]) {
+                    roomPlayers[pos] = { name: data.currentPlayers[pos].name, isMe: false };
+                }
+            });
+        } else {
+            // Fallback for backwards compatibility
+            roomPlayers[data.position] = { name: myPlayerName, isMe: true };
+            if (data.hostPosition && data.hostName) {
+                roomPlayers[data.hostPosition] = { name: data.hostName, isMe: false };
+            }
+        }
 
         document.getElementById('lobbyStatus').innerHTML =
-            `<span style="color: #48bb78;">Joined! You are Player 2: ${myPlayerName}</span>`;
+            `<span style="color: #48bb78;">Joined as ${positionNames[myPosition]}! Waiting for host to start...</span>`;
         document.getElementById('joinBtn').disabled = true;
         document.getElementById('playerNameInput').disabled = true;
 
-        // Show both player names
-        showPartnerInfo(partnerPlayerName, myPlayerName);
+        // Move to setup screen
+        setTimeout(() => {
+            document.getElementById('lobbyScreen').style.display = 'none';
+            document.getElementById('setupScreen').style.display = 'block';
+            updateSetupScreenForMultiplayer();
+            updateStartButton();
+        }, 2000);
     });
 
-    // Partner joined the room (Player 1 receives this)
-    socket.on('partner-joined', (data) => {
-        partnerPlayerName = data.partnerName;
-        document.getElementById('inviteSection').style.display = 'none';
+    // Another player joined the room
+    socket.on('player-joined', (data) => {
+        roomPlayers[data.position] = { name: data.playerName, isMe: false };
 
-        // Show both player names
-        showPartnerInfo(myPlayerName, partnerPlayerName);
+        if (document.getElementById('inviteSection').style.display !== 'none') {
+            document.getElementById('inviteSection').style.display = 'none';
+        }
+
+        // Update the setup screen to show the new player
+        updateSetupScreenForMultiplayer();
+
+        // Show notification
+        console.log(`${data.playerName} joined as ${positionNames[data.position]} (${data.joinAs})`);
     });
 
     // Error joining room
@@ -78,10 +124,28 @@ function initializeSocket() {
         document.getElementById('playerNameInput').disabled = false;
     });
 
-    // Partner disconnected
-    socket.on('partner-disconnected', () => {
-        alert('Your partner has disconnected.');
+    // Player disconnected
+    socket.on('player-disconnected', (data) => {
+        const playerName = roomPlayers[data.position]?.name || 'A player';
+        alert(`${playerName} (${positionNames[data.position]}) has disconnected.`);
+        roomPlayers[data.position] = null;
+    });
+
+    // Host disconnected
+    socket.on('host-disconnected', () => {
+        alert('The host has disconnected. Returning to lobby.');
         window.location.href = window.location.pathname;
+    });
+
+    // Available seats response
+    socket.on('available-seats', (data) => {
+        if (data.error) {
+            document.getElementById('lobbyStatus').innerHTML =
+                `<span style="color: #e53e3e;">${data.error}</span>`;
+            return;
+        }
+
+        showSeatSelection(data);
     });
 
     // Partnership was set by host
@@ -100,7 +164,7 @@ function initializeSocket() {
         updateStartButton();
     });
 
-    // ==================== STATE SYNC (Player 2 receives these) ====================
+    // ==================== STATE SYNC (Clients receive these) ====================
 
     // Receive full game state from host
     socket.on('game-state', (state) => {
@@ -112,13 +176,27 @@ function initializeSocket() {
         currentBidder = state.currentBidder;
         dealerIndex = state.dealerIndex;
         auctionComplete = state.auctionComplete;
-        selectedPartnership = state.partnership;
-        player1Position = state.player1Position;
-        player2Position = state.player2Position;
+
+        // Update roomPlayers from host (but preserve our own isMe flag)
+        if (state.roomPlayers) {
+            ['N', 'S', 'E', 'W'].forEach(pos => {
+                if (pos === myPosition) {
+                    // Keep our own entry with isMe flag
+                    roomPlayers[pos] = { name: myPlayerName, isMe: true };
+                } else if (state.roomPlayers[pos]) {
+                    roomPlayers[pos] = { name: state.roomPlayers[pos].name, isMe: false };
+                } else {
+                    roomPlayers[pos] = null;
+                }
+            });
+        }
 
         // Show game screen if not visible
         document.getElementById('setupScreen').style.display = 'none';
         document.getElementById('gameScreen').style.display = 'block';
+
+        // Hide "New Hand" button for non-host players
+        document.getElementById('newHandBtn').style.display = 'none';
 
         // Rebuild hands data
         if (currentHand && currentHand.cards) {
@@ -131,17 +209,20 @@ function initializeSocket() {
             positions.forEach((pos, idx) => {
                 allHands[pos] = adjustedCards[idx];
             });
-            const player1Index = positions.indexOf(player1Position);
-            const player2Index = positions.indexOf(player2Position);
-            window.player1HandData = formatHand(adjustedCards[player1Index]);
-            window.player2HandData = formatHand(adjustedCards[player2Index]);
         }
 
-        // Update display
-        document.getElementById('player1Title').textContent = `${partnerPlayerName} - ${positionNames[player1Position]}`;
-        document.getElementById('player2Title').textContent = `${myPlayerName} - ${positionNames[player2Position]}`;
-        document.getElementById('partnershipDisplay').textContent =
-            selectedPartnership === 'NS' ? 'North-South' : 'East-West';
+        // Update display - show my position info
+        document.getElementById('player1Title').textContent = `${myPlayerName} - ${positionNames[myPosition]}`;
+
+        // Find partner position to display
+        const partnerPos = getPartner(myPosition);
+        const partnerPlayer = roomPlayers[partnerPos];
+        const partnerName = partnerPlayer ? partnerPlayer.name : 'AI';
+        document.getElementById('player2Title').textContent = `${partnerName} - ${positionNames[partnerPos]}`;
+
+        // Show partnership info
+        const myPartnership = (myPosition === 'N' || myPosition === 'S') ? 'North-South' : 'East-West';
+        document.getElementById('partnershipDisplay').textContent = myPartnership;
         document.getElementById('dealer').textContent = positionNames[positions[dealerIndex]];
         document.getElementById('vulnerability').textContent = getVulnerabilityText(currentHand.vulnerability);
         document.getElementById('handNumber').textContent = currentHand.boardName || 'Unknown';
@@ -153,14 +234,14 @@ function initializeSocket() {
 
     // ==================== HOST RECEIVES BIDS FROM CLIENT ====================
 
-    // Host receives bid from Player 2
+    // Host receives bid from any client player
     socket.on('client-bid', (data) => {
         if (!isHost()) return;
 
-        const { bid } = data;
-        // Verify it's actually Player 2's turn
+        const { bid, position } = data;
+        // Verify it's actually that position's turn
         const currentPos = positions[currentBidder % 4];
-        if (currentPos === player2Position) {
+        if (currentPos === position) {
             // Apply the bid and broadcast new state
             currentAuction.push(bid);
             currentBidder++;
@@ -176,7 +257,7 @@ function initializeSocket() {
     });
 }
 
-// Host broadcasts full game state to Player 2
+// Host broadcasts full game state to all clients
 function broadcastGameState() {
     if (!isHost() || !socket || !currentRoomId) return;
 
@@ -188,29 +269,28 @@ function broadcastGameState() {
             currentBidder: currentBidder,
             dealerIndex: dealerIndex,
             auctionComplete: auctionComplete,
-            partnership: selectedPartnership,
-            player1Position: player1Position,
-            player2Position: player2Position
+            roomPlayers: roomPlayers
         }
     });
 }
 
-// Player 2's version of updateTurnIndicator (display only, no AI logic)
+// Client's version of updateTurnIndicator (display only, no AI logic)
 function updateTurnIndicatorClient() {
     const indicator = document.getElementById('turnIndicator');
     const currentPos = positions[currentBidder % 4];
 
-    // Always show Player 2's own hand (they are player2Position)
-    document.getElementById('player2Spades').textContent = window.player2HandData.S || '-';
-    document.getElementById('player2Hearts').textContent = window.player2HandData.H || '-';
-    document.getElementById('player2Diamonds').textContent = window.player2HandData.D || '-';
-    document.getElementById('player2Clubs').textContent = window.player2HandData.C || '-';
+    // Always show my own hand
+    const myHandData = formatHand(allHands[myPosition]);
+    document.getElementById('player1Spades').textContent = myHandData.S || '-';
+    document.getElementById('player1Hearts').textContent = myHandData.H || '-';
+    document.getElementById('player1Diamonds').textContent = myHandData.D || '-';
+    document.getElementById('player1Clubs').textContent = myHandData.C || '-';
 
-    // Always hide partner's hand
-    document.getElementById('player1Spades').textContent = '???';
-    document.getElementById('player1Hearts').textContent = '???';
-    document.getElementById('player1Diamonds').textContent = '???';
-    document.getElementById('player1Clubs').textContent = '???';
+    // Hide other hands
+    document.getElementById('player2Spades').textContent = '???';
+    document.getElementById('player2Hearts').textContent = '???';
+    document.getElementById('player2Diamonds').textContent = '???';
+    document.getElementById('player2Clubs').textContent = '???';
 
     if (auctionComplete) {
         indicator.textContent = 'Bidding Complete';
@@ -221,20 +301,25 @@ function updateTurnIndicatorClient() {
         return;
     }
 
-    if (currentPos === player1Position) {
-        indicator.textContent = `${partnerPlayerName}'s Turn (${positionNames[currentPos]})`;
+    const currentPlayer = roomPlayers[currentPos];
+
+    if (currentPos === myPosition) {
+        // It's my turn
+        indicator.textContent = `Your Turn (${positionNames[currentPos]})`;
         indicator.className = 'turn-indicator';
         document.getElementById('player1Section').classList.add('active');
         document.getElementById('player2Section').classList.remove('active');
-        disableBidding();
-    } else if (currentPos === player2Position) {
-        indicator.textContent = `Your Turn (${positionNames[currentPos]})`;
-        indicator.className = 'turn-indicator';
-        document.getElementById('player2Section').classList.add('active');
-        document.getElementById('player1Section').classList.remove('active');
         enableBidding();
+    } else if (currentPlayer) {
+        // It's another human player's turn
+        indicator.textContent = `${currentPlayer.name}'s Turn (${positionNames[currentPos]})`;
+        indicator.className = 'turn-indicator';
+        document.getElementById('player1Section').classList.remove('active');
+        document.getElementById('player2Section').classList.remove('active');
+        disableBidding();
     } else {
-        indicator.textContent = `${positionNames[currentPos]}'s Turn (Opponent)`;
+        // It's an AI player's turn
+        indicator.textContent = `${positionNames[currentPos]}'s Turn (AI)`;
         indicator.className = 'turn-indicator waiting-indicator';
         document.getElementById('player1Section').classList.remove('active');
         document.getElementById('player2Section').classList.remove('active');
@@ -242,7 +327,7 @@ function updateTurnIndicatorClient() {
     }
 }
 
-// Show partner info and proceed to setup
+// Show partner info and proceed to setup (legacy - may not be used)
 function showPartnerInfo(p1Name, p2Name) {
     document.getElementById('partnerInfo').style.display = 'block';
     document.getElementById('player1Name').textContent = p1Name;
@@ -253,6 +338,61 @@ function showPartnerInfo(p1Name, p2Name) {
         document.getElementById('lobbyScreen').style.display = 'none';
         document.getElementById('setupScreen').style.display = 'block';
     }, 2000);
+}
+
+// Update setup screen to show current players in the room
+function updateSetupScreenForMultiplayer() {
+    // Hide the old partnership selector
+    const partnershipSelector = document.querySelector('.partnership-selector');
+    if (partnershipSelector) {
+        partnershipSelector.style.display = 'none';
+    }
+
+    // Create or update the players display
+    let playersDisplay = document.getElementById('playersDisplay');
+    if (!playersDisplay) {
+        playersDisplay = document.createElement('div');
+        playersDisplay.id = 'playersDisplay';
+        playersDisplay.className = 'partnership-selector';
+        const startBtn = document.getElementById('startBtn');
+        startBtn.parentNode.insertBefore(playersDisplay, startBtn);
+    }
+
+    // Build the players table
+    let html = '<h3>Players in Room</h3>';
+    html += '<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 15px 0;">';
+
+    ['N', 'S', 'E', 'W'].forEach(pos => {
+        const player = roomPlayers[pos];
+        const isMe = player && player.isMe;
+        const bgColor = player ? (isMe ? '#48bb78' : '#4299e1') : '#718096';
+        const playerText = player ? player.name : 'AI';
+        const meIndicator = isMe ? ' (You)' : '';
+
+        html += `<div style="padding: 10px; background: ${bgColor}; color: white; border-radius: 8px; text-align: center;">
+            <strong>${positionNames[pos]}</strong><br>
+            ${playerText}${meIndicator}
+        </div>`;
+    });
+
+    html += '</div>';
+
+    // Show info about AI players
+    const humanCount = Object.values(roomPlayers).filter(p => p !== null).length;
+    const aiCount = 4 - humanCount;
+    if (aiCount > 0) {
+        html += `<p style="color: #718096; font-size: 14px;">${aiCount} position(s) will be played by AI</p>`;
+    }
+
+    // Only host can start the game
+    if (!isHost()) {
+        html += '<p style="color: #4299e1; font-size: 14px; margin-top: 10px;">Waiting for host to start the game...</p>';
+        document.getElementById('startBtn').style.display = 'none';
+    } else {
+        document.getElementById('startBtn').style.display = 'block';
+    }
+
+    playersDisplay.innerHTML = html;
 }
 
 // Join game button handler
@@ -270,14 +410,114 @@ function joinGame() {
     const roomId = urlParams.get('room');
 
     if (roomId) {
-        // Player 2 joining existing room
-        document.getElementById('lobbyTitle').textContent = 'Joining Partner\'s Game...';
-        socket.emit('join-room', { roomId: roomId, playerName: playerName });
+        // Joining existing room via invite link - request available seats
+        document.getElementById('lobbyTitle').textContent = 'Select Your Seat...';
+        socket.emit('get-available-seats', roomId);
     } else {
-        // Player 1 creating new room
-        document.getElementById('lobbyTitle').textContent = 'Creating Game Room...';
-        socket.emit('create-room', playerName);
+        // Check if an existing room is available to join
+        fetch('/api/rooms')
+            .then(response => response.json())
+            .then(rooms => {
+                if (rooms.length > 0) {
+                    // Join the existing room
+                    pendingJoinRoomId = rooms[0].roomId;
+                    document.getElementById('lobbyTitle').textContent = 'Select Your Seat...';
+                    socket.emit('get-available-seats', rooms[0].roomId);
+                } else {
+                    // No rooms exist - create a new one
+                    showPositionSelection();
+                }
+            })
+            .catch(error => {
+                console.error('Failed to check for rooms:', error);
+                // Fall back to creating a new room
+                showPositionSelection();
+            });
     }
+}
+
+// Show position selection for room creation
+function showPositionSelection() {
+    const lobbyStatus = document.getElementById('lobbyStatus');
+    lobbyStatus.innerHTML = `
+        <div style="margin-top: 20px;">
+            <h3>Select Your Starting Position:</h3>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 15px;">
+                <button class="partnership-btn" onclick="createRoomWithPosition('N')">North</button>
+                <button class="partnership-btn" onclick="createRoomWithPosition('S')">South</button>
+                <button class="partnership-btn" onclick="createRoomWithPosition('E')">East</button>
+                <button class="partnership-btn" onclick="createRoomWithPosition('W')">West</button>
+            </div>
+        </div>
+    `;
+}
+
+// Create room with selected position
+function createRoomWithPosition(position) {
+    const playerName = document.getElementById('playerNameInput').value.trim();
+    document.getElementById('lobbyTitle').textContent = 'Creating Game Room...';
+    socket.emit('create-room', { playerName: playerName, position: position });
+}
+
+// Show seat selection UI
+function showSeatSelection(data) {
+    const lobbyStatus = document.getElementById('lobbyStatus');
+    const hostPos = data.hostPosition;
+    const partnerPos = data.partnerPosition;
+    const opponentPositions = data.opponentPositions;
+    const availableSeats = data.availableSeats;
+
+    let html = '<div style="margin-top: 20px;"><h3>Choose Your Seat:</h3>';
+    html += `<p style="color: #718096;">Host is at ${positionNames[hostPos]}</p>`;
+    html += '<div style="margin-top: 15px;">';
+
+    // Partner option
+    if (availableSeats.includes(partnerPos)) {
+        html += `<button class="partnership-btn" onclick="joinRoomAtPosition('${partnerPos}', 'partner')" style="background: #48bb78; color: white; margin-bottom: 10px;">
+            Join as Partner (${positionNames[partnerPos]})
+        </button><br>`;
+    } else if (data.occupiedSeats[partnerPos]) {
+        html += `<p style="color: #718096;">Partner seat (${positionNames[partnerPos]}) is taken by ${data.occupiedSeats[partnerPos]}</p>`;
+    }
+
+    // Opponent options
+    const availableOpponents = opponentPositions.filter(pos => availableSeats.includes(pos));
+    if (availableOpponents.length > 0) {
+        html += '<p style="margin-top: 15px; color: #718096;">Or join as opponent:</p>';
+        availableOpponents.forEach(pos => {
+            html += `<button class="partnership-btn" onclick="joinRoomAtPosition('${pos}', 'opponent')" style="background: #e53e3e; color: white; margin: 5px;">
+                ${positionNames[pos]}
+            </button>`;
+        });
+    }
+
+    html += '</div></div>';
+    lobbyStatus.innerHTML = html;
+}
+
+// Join room at specific position
+function joinRoomAtPosition(position, joinAs) {
+    const playerName = document.getElementById('playerNameInput').value.trim();
+    const urlParams = new URLSearchParams(window.location.search);
+    // Use URL room ID if available, otherwise use the pending join room ID
+    const roomId = urlParams.get('room') || pendingJoinRoomId;
+
+    if (!roomId) {
+        document.getElementById('lobbyStatus').innerHTML =
+            `<span style="color: #e53e3e;">No room selected. Please try again.</span>`;
+        return;
+    }
+
+    document.getElementById('lobbyTitle').textContent = `Joining as ${positionNames[position]}...`;
+    socket.emit('join-room', {
+        roomId: roomId,
+        playerName: playerName,
+        position: position,
+        joinAs: joinAs
+    });
+
+    // Clear pending room ID
+    pendingJoinRoomId = null;
 }
 
 // Copy invite link to clipboard
@@ -293,25 +533,27 @@ function copyInviteLink() {
     setTimeout(() => { btn.textContent = originalText; }, 2000);
 }
 
-// Fetch and display available rooms
+// Fetch available rooms and update button text accordingly
 function fetchAvailableRooms() {
     fetch('/api/rooms')
         .then(response => response.json())
         .then(rooms => {
-            const availableRoomsDiv = document.getElementById('availableRooms');
-            const roomsList = document.getElementById('roomsList');
+            const joinBtn = document.getElementById('joinBtn');
 
-            if (rooms.length > 0) {
-                availableRoomsDiv.style.display = 'block';
-                roomsList.innerHTML = rooms.map(room => `
-                    <div class="room-item">
-                        <span class="room-host">${room.hostName} is waiting for a partner</span>
-                        <button class="room-join-btn" onclick="joinExistingRoom('${room.roomId}')">Join</button>
-                    </div>
-                `).join('');
+            // If I'm already in a room (as host or player), don't update button
+            if (currentRoomId) {
+                return;
+            }
+
+            // Filter out any room I'm hosting (shouldn't happen but just in case)
+            const joinableRooms = rooms.filter(room => room.roomId !== currentRoomId);
+
+            if (joinableRooms.length > 0) {
+                // A room exists - change button to "Join Game"
+                joinBtn.textContent = 'Join Game';
             } else {
-                availableRoomsDiv.style.display = 'none';
-                roomsList.innerHTML = '';
+                // No rooms - show "Create Game" button
+                joinBtn.textContent = 'Create Game';
             }
         })
         .catch(error => {
@@ -319,7 +561,7 @@ function fetchAvailableRooms() {
         });
 }
 
-// Join an existing room from the list
+// Join an existing room from the list - request available seats first
 function joinExistingRoom(roomId) {
     const playerName = document.getElementById('playerNameInput').value.trim();
 
@@ -329,8 +571,10 @@ function joinExistingRoom(roomId) {
         return;
     }
 
-    document.getElementById('lobbyTitle').textContent = 'Joining Game...';
-    socket.emit('join-room', { roomId: roomId, playerName: playerName });
+    // Store the roomId so we can use it when selecting a seat
+    pendingJoinRoomId = roomId;
+    document.getElementById('lobbyTitle').textContent = 'Select Your Seat...';
+    socket.emit('get-available-seats', roomId);
 }
 
 // Initialize on page load
@@ -564,7 +808,11 @@ document.querySelectorAll('.partnership-btn').forEach(btn => {
 });
 
 function updateStartButton() {
-    document.getElementById('startBtn').disabled = !(hands.length > 0 && selectedPartnership);
+    // Enable start button if we have hands loaded and at least the host is present
+    // In multiplayer mode, the host can start as long as hands are loaded
+    const handsLoaded = hands.length > 0;
+    const canStart = handsLoaded && myPosition;
+    document.getElementById('startBtn').disabled = !canStart;
 }
 
 document.getElementById('startBtn').addEventListener('click', function() {
@@ -592,7 +840,7 @@ function loadNewHandAndSync() {
     broadcastGameState();
 }
 
-// Start the hand locally (called by both initiator and receiver)
+// Start the hand locally (called by host)
 function startHandLocally() {
     currentAuction = [];
     auctionComplete = false;
@@ -614,13 +862,7 @@ function startHandLocally() {
         allHands[pos] = adjustedCards[idx];
     });
 
-    const player1Index = positions.indexOf(player1Position);
-    const player2Index = positions.indexOf(player2Position);
-
-    window.player1HandData = formatHand(adjustedCards[player1Index]);
-    window.player2HandData = formatHand(adjustedCards[player2Index]);
-
-    // Hide hands initially
+    // Hide hands initially (will be shown by updateTurnIndicator)
     document.getElementById('player1Spades').textContent = '???';
     document.getElementById('player1Hearts').textContent = '???';
     document.getElementById('player1Diamonds').textContent = '???';
@@ -632,11 +874,17 @@ function startHandLocally() {
     document.getElementById('player2Clubs').textContent = '???';
 
     // Show player names with positions
-    document.getElementById('player1Title').textContent = `${myPlayerNumber === 1 ? myPlayerName : partnerPlayerName} - ${positionNames[player1Position]}`;
-    document.getElementById('player2Title').textContent = `${myPlayerNumber === 2 ? myPlayerName : partnerPlayerName} - ${positionNames[player2Position]}`;
+    document.getElementById('player1Title').textContent = `${myPlayerName} - ${positionNames[myPosition]}`;
 
-    document.getElementById('partnershipDisplay').textContent =
-        selectedPartnership === 'NS' ? 'North-South' : 'East-West';
+    // Find partner position to display
+    const partnerPos = getPartner(myPosition);
+    const partnerPlayer = roomPlayers[partnerPos];
+    const partnerName = partnerPlayer ? partnerPlayer.name : 'AI';
+    document.getElementById('player2Title').textContent = `${partnerName} - ${positionNames[partnerPos]}`;
+
+    // Show partnership info
+    const myPartnership = (myPosition === 'N' || myPosition === 'S') ? 'North-South' : 'East-West';
+    document.getElementById('partnershipDisplay').textContent = myPartnership;
     document.getElementById('dealer').textContent = positionNames[positions[dealerIndex]];
     document.getElementById('vulnerability').textContent = getVulnerabilityText(currentHand.vulnerability);
     document.getElementById('handNumber').textContent = currentHand.boardName || 'Unknown';
@@ -822,30 +1070,25 @@ function setupBiddingGrid() {
     });
 }
 
+// Check if it's a human player's turn (not AI)
 function isPlayerTurn() {
     const currentPos = positions[currentBidder % 4];
-    return currentPos === player1Position || currentPos === player2Position;
+    // Check if any human player is at this position
+    return roomPlayers[currentPos] !== null;
 }
 
 // Check if it's specifically MY turn (the current client's turn)
 function isMyTurn() {
     const currentPos = positions[currentBidder % 4];
-    if (myPlayerNumber === 1) {
-        return currentPos === player1Position;
-    } else if (myPlayerNumber === 2) {
-        return currentPos === player2Position;
-    }
-    // Fallback for single-player mode (no multiplayer)
-    return isPlayerTurn();
+    return currentPos === myPosition;
 }
 
 // Flag to prevent multiple AI bid timers from being scheduled
 let aiBidScheduled = false;
 
-// Main turn indicator function - used by Host (Player 1)
-// Player 2 uses updateTurnIndicatorClient() instead
+// Main turn indicator function
 function updateTurnIndicator() {
-    // Player 2 should use updateTurnIndicatorClient() instead
+    // Non-host clients should use updateTurnIndicatorClient() instead
     if (!isHost() && currentRoomId) {
         updateTurnIndicatorClient();
         return;
@@ -869,47 +1112,52 @@ function updateTurnIndicator() {
         return;
     }
 
-    // Always show Player 1's own hand (they are player1Position)
-    document.getElementById('player1Spades').textContent = window.player1HandData.S || '-';
-    document.getElementById('player1Hearts').textContent = window.player1HandData.H || '-';
-    document.getElementById('player1Diamonds').textContent = window.player1HandData.D || '-';
-    document.getElementById('player1Clubs').textContent = window.player1HandData.C || '-';
+    // Show my own hand
+    const myHandData = formatHand(allHands[myPosition]);
+    document.getElementById('player1Spades').textContent = myHandData.S || '-';
+    document.getElementById('player1Hearts').textContent = myHandData.H || '-';
+    document.getElementById('player1Diamonds').textContent = myHandData.D || '-';
+    document.getElementById('player1Clubs').textContent = myHandData.C || '-';
 
-    // Always hide partner's hand
+    // Hide other hands (or show if player is present and partnership)
     document.getElementById('player2Spades').textContent = '???';
     document.getElementById('player2Hearts').textContent = '???';
     document.getElementById('player2Diamonds').textContent = '???';
     document.getElementById('player2Clubs').textContent = '???';
 
-    if (currentPos === player1Position) {
+    const currentPlayer = roomPlayers[currentPos];
+
+    if (currentPos === myPosition) {
+        // It's my turn
         indicator.textContent = `Your Turn (${positionNames[currentPos]})`;
         indicator.className = 'turn-indicator';
         document.getElementById('player1Section').classList.add('active');
         document.getElementById('player2Section').classList.remove('active');
         enableBidding();
-    } else if (currentPos === player2Position) {
-        indicator.textContent = `${partnerPlayerName}'s Turn (${positionNames[currentPos]})`;
+    } else if (currentPlayer) {
+        // It's another human player's turn
+        indicator.textContent = `${currentPlayer.name}'s Turn (${positionNames[currentPos]})`;
         indicator.className = 'turn-indicator';
-        document.getElementById('player2Section').classList.add('active');
         document.getElementById('player1Section').classList.remove('active');
+        document.getElementById('player2Section').classList.remove('active');
         disableBidding();
-        // Wait for Player 2's bid to come via client-bid socket event
     } else {
-        indicator.textContent = `${positionNames[currentPos]}'s Turn (Opponent - Thinking...)`;
+        // It's an AI opponent's turn
+        indicator.textContent = `${positionNames[currentPos]}'s Turn (AI - Thinking...)`;
         indicator.className = 'turn-indicator waiting-indicator';
         document.getElementById('player1Section').classList.remove('active');
         document.getElementById('player2Section').classList.remove('active');
         disableBidding();
 
-        // Host generates AI bids
-        if (!aiBidScheduled) {
+        // Host generates AI bids for empty seats
+        if (isHost() && !aiBidScheduled) {
             aiBidScheduled = true;
             setTimeout(() => {
                 aiBidScheduled = false;
                 if (!auctionComplete) {
                     const currentPosNow = positions[currentBidder % 4];
-                    // Double-check it's still an opponent's turn
-                    if (currentPosNow !== player1Position && currentPosNow !== player2Position) {
+                    // Double-check it's still an AI turn
+                    if (!roomPlayers[currentPosNow]) {
                         const aiBid = getAIBid(currentPosNow);
                         makeAIBid(aiBid);
                     }
@@ -919,14 +1167,14 @@ function updateTurnIndicator() {
     }
 }
 
-// Make an AI bid (only called by Host/Player 1) and broadcast state to partner
+// Make an AI bid (only called by Host) and broadcast state to all clients
 function makeAIBid(bid) {
     if (auctionComplete) return;
     if (!isHost() && currentRoomId) return; // Only host makes AI bids in multiplayer
 
-    // Check that it's still an opponent's turn (not a human player's turn)
+    // Check that it's still an AI turn (not a human player's turn)
     const currentPos = positions[currentBidder % 4];
-    if (currentPos === player1Position || currentPos === player2Position) {
+    if (roomPlayers[currentPos]) {
         // It's a human player's turn now, don't make AI bid
         return;
     }
@@ -941,7 +1189,7 @@ function makeAIBid(bid) {
     updateAuction();
     updateTurnIndicator();
 
-    // Host broadcasts updated state to Player 2
+    // Host broadcasts updated state to all clients
     broadcastGameState();
 }
 
@@ -949,17 +1197,18 @@ function makeBid(bid, autoPass = false) {
     if (!autoPass && !isMyTurn()) return;
     if (auctionComplete) return;
 
-    // If I'm Player 2 (client), send bid to host for processing
+    // If I'm not the host, send bid to host for processing
     if (!isHost() && socket && currentRoomId) {
         socket.emit('client-bid', {
             roomId: currentRoomId,
-            bid: bid
+            bid: bid,
+            position: myPosition
         });
         // Don't update local state - wait for host to broadcast back
         return;
     }
 
-    // Host (Player 1) applies bid locally
+    // Host applies bid locally
     currentAuction.push(bid);
     currentBidder++;
 
@@ -970,7 +1219,7 @@ function makeBid(bid, autoPass = false) {
     updateAuction();
     updateTurnIndicator();
 
-    // Host broadcasts updated state to Player 2
+    // Host broadcasts updated state to all clients
     broadcastGameState();
 }
 

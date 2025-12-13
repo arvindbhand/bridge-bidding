@@ -22,14 +22,23 @@ app.get('/health', (req, res) => {
     res.status(200).send('OK');
 });
 
-// API endpoint to get available rooms (waiting for partner)
+// API endpoint to get available rooms
 app.get('/api/rooms', (req, res) => {
     const availableRooms = [];
     for (const [roomId, room] of rooms.entries()) {
-        if (!room.player2) {
+        const occupiedSeats = [];
+        if (room.north) occupiedSeats.push('N');
+        if (room.south) occupiedSeats.push('S');
+        if (room.east) occupiedSeats.push('E');
+        if (room.west) occupiedSeats.push('W');
+
+        if (occupiedSeats.length < 4) {
             availableRooms.push({
                 roomId: roomId,
-                hostName: room.player1.name
+                hostName: room.host.name,
+                hostPosition: room.host.position,
+                occupiedSeats: occupiedSeats,
+                availableSeats: ['N', 'S', 'E', 'W'].filter(s => !occupiedSeats.includes(s))
             });
         }
     }
@@ -42,51 +51,77 @@ const rooms = new Map();
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    // Create a new room (Player 1)
-    socket.on('create-room', (playerName) => {
+    // Create a new room
+    socket.on('create-room', (data) => {
+        const { playerName, position } = data;
+
+        // Limit to maximum 1 room at a time
+        if (rooms.size >= 1) {
+            socket.emit('room-error', 'A room already exists. Please join the existing room instead.');
+            return;
+        }
+
         const roomId = uuidv4().substring(0, 8);
 
-        rooms.set(roomId, {
-            player1: {
+        const room = {
+            host: {
                 id: socket.id,
                 name: playerName,
-                ready: false
+                position: position
             },
-            player2: null,
-            partnership: null,
+            north: null,
+            south: null,
+            east: null,
+            west: null,
             currentHand: null,
             auction: []
-        });
+        };
+
+        // Set the host's position
+        room[position.toLowerCase()] = {
+            id: socket.id,
+            name: playerName,
+            ready: false
+        };
+
+        rooms.set(roomId, room);
 
         socket.join(roomId);
         socket.roomId = roomId;
-        socket.playerNumber = 1;
+        socket.position = position;
 
         socket.emit('room-created', {
             roomId: roomId,
             playerName: playerName,
-            playerNumber: 1
+            position: position
         });
 
-        console.log(`Room created: ${roomId} by ${playerName}`);
+        console.log(`Room created: ${roomId} by ${playerName} at ${position}`);
     });
 
-    // Join an existing room (Player 2)
+    // Join an existing room with seat selection
     socket.on('join-room', (data) => {
-        const { roomId, playerName } = data;
+        const { roomId, playerName, position, joinAs } = data;
         const room = rooms.get(roomId);
 
         if (!room) {
-            socket.emit('room-error', 'Room not found. Please check the link or ask your partner for a new one.');
+            socket.emit('room-error', 'Room not found. Please check the link or ask for a new one.');
             return;
         }
 
-        if (room.player2) {
-            socket.emit('room-error', 'Room is full. This game already has two players.');
+        if (socket.id === room.host.id) {
+            socket.emit('room-error', 'You cannot join your own room. Share the invite link with others.');
             return;
         }
 
-        room.player2 = {
+        // Check if requested position is available
+        if (room[position.toLowerCase()]) {
+            socket.emit('room-error', `The ${position} seat is already taken. Please choose another seat.`);
+            return;
+        }
+
+        // Add player to the room
+        room[position.toLowerCase()] = {
             id: socket.id,
             name: playerName,
             ready: false
@@ -94,79 +129,147 @@ io.on('connection', (socket) => {
 
         socket.join(roomId);
         socket.roomId = roomId;
-        socket.playerNumber = 2;
+        socket.position = position;
 
-        // Notify Player 2 that they joined
+        // Determine partner and opponents
+        const partnerPosition = getPartnerPosition(position);
+        const opponentPositions = getOpponentPositions(position);
+
+        const partner = room[partnerPosition.toLowerCase()];
+        const isPartner = joinAs === 'partner';
+
+        // Gather all current players in the room to send to the joining player
+        const currentPlayers = {};
+        ['N', 'S', 'E', 'W'].forEach(pos => {
+            const player = room[pos.toLowerCase()];
+            if (player) {
+                currentPlayers[pos] = { name: player.name };
+            }
+        });
+
+        // Notify the joining player
         socket.emit('room-joined', {
             roomId: roomId,
             playerName: playerName,
-            playerNumber: 2,
-            partner: room.player1.name
+            position: position,
+            joinAs: joinAs,
+            partnerName: partner ? partner.name : null,
+            hostName: room.host.name,
+            hostPosition: room.host.position,
+            currentPlayers: currentPlayers
         });
 
-        // Notify Player 1 that their partner joined
-        io.to(room.player1.id).emit('partner-joined', {
-            partnerName: playerName,
-            player1Name: room.player1.name,
-            player2Name: playerName
+        // Notify all other players in the room
+        socket.to(roomId).emit('player-joined', {
+            playerName: playerName,
+            position: position,
+            joinAs: joinAs
         });
 
-        console.log(`${playerName} joined room: ${roomId} as partner of ${room.player1.name}`);
+        console.log(`${playerName} joined room: ${roomId} at ${position} as ${joinAs}`);
     });
+
+    // Get available seats for a room
+    socket.on('get-available-seats', (roomId) => {
+        const room = rooms.get(roomId);
+        if (!room) {
+            socket.emit('available-seats', { error: 'Room not found' });
+            return;
+        }
+
+        const availableSeats = [];
+        ['N', 'S', 'E', 'W'].forEach(pos => {
+            if (!room[pos.toLowerCase()]) {
+                availableSeats.push(pos);
+            }
+        });
+
+        const hostPosition = room.host.position;
+        const partnerPosition = getPartnerPosition(hostPosition);
+        const opponentPositions = getOpponentPositions(hostPosition);
+
+        socket.emit('available-seats', {
+            availableSeats: availableSeats,
+            hostPosition: hostPosition,
+            partnerPosition: partnerPosition,
+            opponentPositions: opponentPositions,
+            occupiedSeats: {
+                N: room.north ? room.north.name : null,
+                S: room.south ? room.south.name : null,
+                E: room.east ? room.east.name : null,
+                W: room.west ? room.west.name : null
+            }
+        });
+    });
+
+    // Helper function to get partner position
+    function getPartnerPosition(position) {
+        const partners = { 'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E' };
+        return partners[position];
+    }
+
+    // Helper function to get opponent positions
+    function getOpponentPositions(position) {
+        const opponents = {
+            'N': ['E', 'W'],
+            'S': ['E', 'W'],
+            'E': ['N', 'S'],
+            'W': ['N', 'S']
+        };
+        return opponents[position];
+    }
 
     // Player ready to start
     socket.on('player-ready', (roomId) => {
         const room = rooms.get(roomId);
         if (!room) return;
 
-        if (socket.id === room.player1.id) {
-            room.player1.ready = true;
-        } else if (room.player2 && socket.id === room.player2.id) {
-            room.player2.ready = true;
-        }
+        // Find the player and mark them ready
+        ['north', 'south', 'east', 'west'].forEach(pos => {
+            if (room[pos] && socket.id === room[pos].id) {
+                room[pos].ready = true;
+            }
+        });
 
-        // Check if both players are ready
-        if (room.player1.ready && room.player2 && room.player2.ready) {
-            io.to(roomId).emit('both-players-ready');
+        // Check if all present players are ready
+        const presentPlayers = [];
+        ['north', 'south', 'east', 'west'].forEach(pos => {
+            if (room[pos]) {
+                presentPlayers.push(room[pos]);
+            }
+        });
+
+        const allReady = presentPlayers.length >= 2 && presentPlayers.every(p => p.ready);
+        if (allReady) {
+            io.to(roomId).emit('all-players-ready');
         }
     });
 
-    // Set partnership
-    socket.on('set-partnership', (data) => {
-        const { roomId, partnership } = data;
-        const room = rooms.get(roomId);
-        if (!room) return;
-
-        room.partnership = partnership;
-        io.to(roomId).emit('partnership-set', partnership);
-    });
-
-    // Host broadcasts full game state to client
+    // Host broadcasts full game state to all clients
     socket.on('game-state', (data) => {
         const { roomId, state } = data;
         const room = rooms.get(roomId);
         if (!room) return;
 
-        // Only host (player 1) can broadcast state
-        if (socket.id !== room.player1.id) return;
+        // Only host can broadcast state
+        if (socket.id !== room.host.id) return;
 
-        // Send state to Player 2
-        if (room.player2) {
-            io.to(room.player2.id).emit('game-state', state);
-        }
+        // Send state to all other players
+        socket.to(roomId).emit('game-state', state);
     });
 
-    // Client (Player 2) sends bid to host
+    // Client sends bid to host
     socket.on('client-bid', (data) => {
-        const { roomId, bid } = data;
+        const { roomId, bid, position } = data;
         const room = rooms.get(roomId);
         if (!room) return;
 
-        // Only Player 2 can send client-bid
-        if (!room.player2 || socket.id !== room.player2.id) return;
+        // Verify the player is in the room and it's their bid
+        const player = room[position.toLowerCase()];
+        if (!player || socket.id !== player.id) return;
 
-        // Forward to host (Player 1)
-        io.to(room.player1.id).emit('client-bid', { bid });
+        // Forward to host
+        io.to(room.host.id).emit('client-bid', { bid, position });
     });
 
     // Disconnect
@@ -175,15 +278,37 @@ io.on('connection', (socket) => {
 
         // Find and clean up room
         for (const [roomId, room] of rooms.entries()) {
-            if (room.player1.id === socket.id) {
-                if (room.player2) {
-                    io.to(room.player2.id).emit('partner-disconnected');
+            let playerDisconnected = false;
+            let disconnectedPosition = null;
+
+            // Check each position
+            ['north', 'south', 'east', 'west'].forEach(pos => {
+                if (room[pos] && room[pos].id === socket.id) {
+                    playerDisconnected = true;
+                    disconnectedPosition = pos.toUpperCase();
+                    room[pos] = null;
                 }
-                rooms.delete(roomId);
-                console.log(`Room deleted: ${roomId}`);
-            } else if (room.player2 && room.player2.id === socket.id) {
-                io.to(room.player1.id).emit('partner-disconnected');
-                room.player2 = null;
+            });
+
+            if (playerDisconnected) {
+                // Check if any human players remain in the room
+                const remainingPlayers = ['north', 'south', 'east', 'west'].filter(pos => room[pos] !== null);
+
+                if (remainingPlayers.length === 0) {
+                    // No players left, delete the room
+                    rooms.delete(roomId);
+                    console.log(`Room deleted: ${roomId} (all players disconnected)`);
+                } else if (socket.id === room.host.id) {
+                    // Host disconnected but others remain - notify and close room
+                    io.to(roomId).emit('host-disconnected');
+                    rooms.delete(roomId);
+                    console.log(`Room deleted: ${roomId} (host disconnected)`);
+                } else {
+                    // Non-host player disconnected, notify others
+                    io.to(roomId).emit('player-disconnected', {
+                        position: disconnectedPosition
+                    });
+                }
             }
         }
     });

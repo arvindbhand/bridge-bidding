@@ -36,10 +36,6 @@
                     <p><strong>Player 1:</strong> <span id="player1Name"></span></p>
                     <p><strong>Player 2:</strong> <span id="player2Name"></span></p>
                 </div>
-                <div id="availableRooms" class="available-rooms" style="display: none;">
-                    <h3>Or Join an Existing Game</h3>
-                    <div id="roomsList"></div>
-                </div>
             </div>
 
             <div class="setup-screen" id="setupScreen" style="display: none;">
@@ -150,7 +146,7 @@
                 </div>
 
                 <div class="controls">
-                    <button class="control-btn new-hand-btn" onclick="loadNewHand()">New Hand</button>
+                    <button class="control-btn new-hand-btn" id="newHandBtn" onclick="loadNewHand()">New Hand</button>
                     <button class="control-btn show-answer-btn" id="showHandsBtn" onclick="showParContractModal()" disabled>Show Hands</button>
                 </div>
             </div>
